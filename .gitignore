@@ -35,3 +35,5 @@ Thumbs.db
 .env
 .pyspy-mcp-server.json
 .zcode/
+.playwright-mcp/
+doc/
