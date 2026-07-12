@@ -1,6 +1,6 @@
 [project]
 name = "pyspy-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "MCP server for Python performance testing with py-spy"
 readme = "README.md"
 license = {text = "MIT"}
