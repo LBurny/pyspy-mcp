@@ -2,30 +2,42 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import sys
-import tempfile
+import time
+from collections import deque
 from pathlib import Path
+from threading import Thread
 from typing import List, Optional
 
 from . import parser
+from .cleanup import managed_subprocess, temp_file
+from .errors import map_subprocess_error
 from .process_util import PythonProcess, format_process_list, list_python_processes
 from .py_spy_finder import find_py_spy
+
+
+logger = logging.getLogger(__name__)
 
 
 # Valid output formats supported by py-spy record.
 VALID_FORMATS = {"flamegraph", "speedscope", "raw", "chrometrace"}
 
 
-def _run_py_spy(args: List[str], timeout: Optional[int] = None) -> subprocess.CompletedProcess:
+def _run_py_spy(
+    args: List[str], timeout: Optional[int] = None, action: str = "run"
+) -> subprocess.CompletedProcess:
     """Run py-spy with the given arguments and return the completed process."""
     binary = find_py_spy()
     env = os.environ.copy()
     env.setdefault("RUST_LOG", "warn")
     env.setdefault("RUST_BACKTRACE", "1")
+    full_args = [binary, *args]
+    logger.debug("Running py-spy command: %s", " ".join(full_args))
     return subprocess.run(
-        [binary, *args],
+        full_args,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -35,6 +47,13 @@ def _run_py_spy(args: List[str], timeout: Optional[int] = None) -> subprocess.Co
         check=False,
     )
 
+
+def _check_result(result: subprocess.CompletedProcess, action: str) -> None:
+    """Raise a structured error if py-spy failed."""
+    if result.returncode != 0:
+        err = map_subprocess_error(result, action)
+        logger.warning("py-spy %s failed: %s", action, err.message)
+        raise err
 
 
 def record_profile(
@@ -62,42 +81,48 @@ def record_profile(
     if duration <= 0:
         raise ValueError("duration must be positive")
 
+    def _build_args(out: Path) -> List[str]:
+        args = [
+            "record",
+            "-o", str(out),
+            "--format", output_format,
+            "-d", str(duration),
+            "-r", str(rate),
+        ]
+        if native:
+            args.append("--native")
+        if idle:
+            args.append("--idle")
+        if gil:
+            args.append("--gil")
+        if subprocesses:
+            args.append("--subprocesses")
+        if pid:
+            args.extend(["--pid", str(pid)])
+        else:
+            args.append("--")
+            args.extend(command)
+        return args
+
     if output_path:
         out = Path(output_path)
-    else:
-        suffix = ".svg" if output_format == "flamegraph" else ".json" if output_format in ("speedscope", "chrometrace") else ".txt"
-        out = Path(tempfile.mkstemp(suffix=suffix, prefix="pyspy_")[1])
+        args = _build_args(out)
+        result = _run_py_spy(args, timeout=duration + 30, action="record")
+        _check_result(result, "record")
+        with open(out, "r", encoding="utf-8", errors="replace") as f:
+            return f.read()
 
-    args = [
-        "record",
-        "-o", str(out),
-        "--format", output_format,
-        "-d", str(duration),
-        "-r", str(rate),
-    ]
-    if native:
-        args.append("--native")
-    if idle:
-        args.append("--idle")
-    if gil:
-        args.append("--gil")
-    if subprocesses:
-        args.append("--subprocesses")
-
-    if pid:
-        args.extend(["--pid", str(pid)])
-    else:
-        args.append("--")
-        args.extend(command)
-
-    result = _run_py_spy(args, timeout=duration + 30)
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"py-spy record failed (exit {result.returncode}):\n{result.stderr}"
-        )
-
-    with open(out, "r", encoding="utf-8", errors="replace") as f:
-        return f.read()
+    suffix = (
+        ".svg" if output_format == "flamegraph"
+        else ".json" if output_format in ("speedscope", "chrometrace")
+        else ".txt"
+    )
+    with temp_file(suffix=suffix, prefix="pyspy_") as out:
+        args = _build_args(out)
+        result = _run_py_spy(args, timeout=duration + 30, action="record")
+        _check_result(result, "record")
+        with open(out, "r", encoding="utf-8", errors="replace") as f:
+            return f.read()
 
 
 def dump_stacks(
@@ -120,11 +145,8 @@ def dump_stacks(
     if native:
         args.append("--native")
 
-    result = _run_py_spy(args, timeout=30)
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"py-spy dump failed (exit {result.returncode}):\n{result.stderr}"
-        )
+    result = _run_py_spy(args, timeout=30, action="dump")
+    _check_result(result, "dump")
     return result.stdout
 
 
@@ -235,11 +257,19 @@ def top_profile(
         args.append("--")
         args.extend(command)
 
-    # top runs indefinitely; collect output for the requested duration then terminate.
     binary = find_py_spy()
     env = os.environ.copy()
     env.setdefault("RUST_LOG", "warn")
-    proc = subprocess.Popen(
+    lines: deque[str] = deque(maxlen=tail_lines)
+
+    def reader(stream) -> None:
+        try:
+            for line in stream:
+                lines.append(line.rstrip("\n"))
+        except Exception:
+            pass
+
+    with managed_subprocess(
         [binary, *args],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -247,33 +277,17 @@ def top_profile(
         encoding="utf-8",
         errors="replace",
         env=env,
-    )
-
-    from collections import deque
-    import threading
-    import time
-
-    lines: deque[str] = deque(maxlen=tail_lines)
-
-    def reader() -> None:
+    ) as proc:
+        reader_thread = Thread(target=reader, args=(proc.stdout,), daemon=True)
+        reader_thread.start()
+        time.sleep(duration)
+        proc.terminate()
         try:
-            for line in proc.stdout:
-                lines.append(line.rstrip("\n"))
-        except Exception:
-            pass
-
-    reader_thread = threading.Thread(target=reader, daemon=True)
-    reader_thread.start()
-
-    time.sleep(duration)
-    proc.terminate()
-    try:
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait(timeout=5)
-
-    reader_thread.join(timeout=5)
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+        reader_thread.join(timeout=5)
 
     if not lines and proc.stderr:
         return proc.stderr.read()
@@ -292,12 +306,10 @@ def _top_profile_windows(
     top_n: int,
 ) -> str:
     """Windows fallback for top_profile using a short raw recording."""
-    fd, path = tempfile.mkstemp(suffix=".txt", prefix="pyspy_top_")
-    os.close(fd)
-    try:
+    with temp_file(suffix=".txt", prefix="pyspy_top_") as path:
         args = [
             "record",
-            "-o", path,
+            "-o", str(path),
             "--format", "raw",
             "-d", str(duration),
             "-r", str(rate),
@@ -317,19 +329,11 @@ def _top_profile_windows(
             args.append("--")
             args.extend(command)
 
-        result = _run_py_spy(args, timeout=duration + 30)
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"py-spy top (Windows fallback) failed (exit {result.returncode}):\n{result.stderr}"
-            )
+        result = _run_py_spy(args, timeout=duration + 30, action="top")
+        _check_result(result, "top")
 
         frames = parser.parse_raw(path, top_n=top_n)
         if not frames:
             return "No samples collected."
         return parser.format_hot_frames(frames)
-    finally:
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
 
