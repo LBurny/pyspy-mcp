@@ -10,9 +10,9 @@ authors = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/LBunny/pyspy-mcp"
-Repository = "https://github.com/LBunny/pyspy-mcp"
-Issues = "https://github.com/LBunny/pyspy-mcp/issues"
+Homepage = "https://github.com/LBurny/pyspy-mcp"
+Repository = "https://github.com/LBurny/pyspy-mcp"
+Issues = "https://github.com/LBurny/pyspy-mcp/issues"
 keywords = ["mcp", "py-spy", "profiler", "python", "performance"]
 classifiers = [
     "Development Status :: 3 - Alpha",
