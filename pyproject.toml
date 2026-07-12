@@ -8,11 +8,6 @@ requires-python = ">=3.10"
 authors = [
     {name = "LBunny"},
 ]
-
-[project.urls]
-Homepage = "https://github.com/LBurny/pyspy-mcp"
-Repository = "https://github.com/LBurny/pyspy-mcp"
-Issues = "https://github.com/LBurny/pyspy-mcp/issues"
 keywords = ["mcp", "py-spy", "profiler", "python", "performance"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -34,6 +29,11 @@ dependencies = [
     # automatically during development (see py_spy_finder.py).
     "py-spy>=0.4.2",
 ]
+
+[project.urls]
+Homepage = "https://github.com/LBurny/pyspy-mcp"
+Repository = "https://github.com/LBurny/pyspy-mcp"
+Issues = "https://github.com/LBurny/pyspy-mcp/issues"
 
 [project.optional-dependencies]
 dev = [
