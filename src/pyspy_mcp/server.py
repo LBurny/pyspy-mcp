@@ -258,7 +258,10 @@ def main() -> None:
         logger.info("Resolved py-spy binary: %s", find_py_spy())
     except FileNotFoundError as exc:
         logger.warning("Could not resolve py-spy binary: %s", exc)
-    mcp.run(transport=args.transport, port=args.port)
+    run_kwargs = {"transport": args.transport, "show_banner": False}
+    if args.transport != "stdio":
+        run_kwargs["port"] = args.port
+    mcp.run(**run_kwargs)
 
 
 if __name__ == "__main__":
