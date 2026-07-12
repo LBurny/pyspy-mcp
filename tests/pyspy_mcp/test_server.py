@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 from unittest.mock import patch
@@ -44,3 +45,36 @@ def test_resource_list_processes_returns_json():
     assert len(result.contents) == 1
     data = json.loads(result.contents[0].content)
     assert isinstance(data, list)
+
+
+def test_main_runs_stdio_without_port():
+    """stdio transport must not pass 'port' to FastMCP.run."""
+    from unittest.mock import patch
+    from pyspy_mcp import server
+
+    with patch.object(server, "parse_args", return_value=argparse.Namespace(
+        verbose=False, transport="stdio", port=8080
+    )):
+        with patch.object(server.mcp, "run") as mock_run:
+            server.main()
+    mock_run.assert_called_once()
+    kwargs = mock_run.call_args.kwargs
+    assert kwargs.get("transport") == "stdio"
+    assert "port" not in kwargs
+    assert kwargs.get("show_banner") is False
+
+
+def test_main_runs_http_with_port():
+    """http transport must pass port to FastMCP.run."""
+    from unittest.mock import patch
+    from pyspy_mcp import server
+
+    with patch.object(server, "parse_args", return_value=argparse.Namespace(
+        verbose=False, transport="http", port=9000
+    )):
+        with patch.object(server.mcp, "run") as mock_run:
+            server.main()
+    kwargs = mock_run.call_args.kwargs
+    assert kwargs.get("transport") == "http"
+    assert kwargs.get("port") == 9000
+    assert kwargs.get("show_banner") is False
