@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from pyspy_mcp import parser
+from pyspy_mcp import parser, tools
 from pyspy_mcp.py_spy_finder import find_py_spy
 
 
@@ -111,3 +111,29 @@ def test_compare_profiles_shows_delta():
     finally:
         os.unlink(a)
         os.unlink(b)
+
+
+def test_dump_stacks_locals_level_range():
+    """locals_level must be within 0-2."""
+    with pytest.raises(ValueError, match="between 0 and 2"):
+        tools.dump_stacks(pid=12345, locals_level=-1)
+    with pytest.raises(ValueError, match="between 0 and 2"):
+        tools.dump_stacks(pid=12345, locals_level=3)
+
+
+def test_analyze_profile_top_n_positive():
+    """top_n must be positive."""
+    with pytest.raises(ValueError, match="positive"):
+        tools.analyze_profile("/tmp/fake.json", top_n=0)
+
+
+def test_compare_profiles_top_n_positive():
+    """top_n must be positive."""
+    with pytest.raises(ValueError, match="positive"):
+        tools.compare_profiles("/tmp/a.json", "/tmp/b.json", top_n=0)
+
+
+def test_find_py_sky_alias_removed():
+    """The misspelled backwards-compatibility alias should be gone."""
+    assert not hasattr(tools, "find_py_sky")
+    assert hasattr(tools, "find_py_spy")

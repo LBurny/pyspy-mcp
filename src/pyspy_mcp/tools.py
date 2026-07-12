@@ -36,9 +36,6 @@ def _run_py_spy(args: List[str], timeout: Optional[int] = None) -> subprocess.Co
     )
 
 
-# Alias kept for backwards compatibility.
-find_py_sky = find_py_spy
-
 
 def record_profile(
     pid: Optional[int] = None,
@@ -111,6 +108,8 @@ def dump_stacks(
     native: bool = False,
 ) -> str:
     """Dump the current Python call stacks for a process."""
+    if not (0 <= locals_level <= 2):
+        raise ValueError("locals_level must be between 0 and 2")
     args = ["dump", "--pid", str(pid)]
     if json_output:
         args.append("--json")
@@ -139,6 +138,8 @@ def list_python_processes_tool() -> str:
 
 def analyze_profile(profile_path: str, top_n: int = 10) -> str:
     """Analyze an existing profile file and return the hottest frames."""
+    if top_n <= 0:
+        raise ValueError("top_n must be a positive integer")
     path = Path(profile_path)
     if not path.exists():
         raise FileNotFoundError(f"Profile not found: {profile_path}")
@@ -162,6 +163,8 @@ def analyze_profile(profile_path: str, top_n: int = 10) -> str:
 
 def compare_profiles(profile_a: str, profile_b: str, top_n: int = 10) -> str:
     """Compare two profiles and return a table of changes."""
+    if top_n <= 0:
+        raise ValueError("top_n must be a positive integer")
     return parser.compare_profiles(profile_a, profile_b, top_n=top_n)
 
 

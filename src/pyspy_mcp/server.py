@@ -9,10 +9,21 @@ from fastmcp import FastMCP
 
 from . import tools
 
-mcp = FastMCP("pyspy-mcp")
+mcp = FastMCP(
+    "pyspy-mcp",
+    instructions=(
+        "A Python performance profiling assistant powered by py-spy. "
+        "Recommended workflow: "
+        "1) call list_python_processes to discover candidate Python processes; "
+        "2) use record_profile to sample a target PID or command; "
+        "3) use analyze_profile or compare_profiles to inspect results. "
+        "Profiling may require elevated permissions (ptrace on Linux, root on macOS, Administrator on Windows). "
+        "When comparing two runs, generate both profiles with the same duration and rate."
+    ),
+)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"destructiveHint": True})
 def record_profile(
     pid: Optional[int] = None,
     command: Optional[List[str]] = None,
@@ -26,11 +37,16 @@ def record_profile(
 ) -> str:
     """Record a sampling profile of a Python process or command.
 
+    Typical workflow:
+        1. list_python_processes() -> pick a target PID
+        2. record_profile(pid=..., duration=10, output_format="speedscope")
+        3. analyze_profile(profile_path=...) -> hottest frames
+
     Args:
         pid: Process ID to sample. Use this OR command, not both.
         command: Command to run and sample, e.g. ["python", "script.py"]. Use this OR pid.
-        duration: How many seconds to sample (default 5).
-        output_format: One of "speedscope" (JSON), "flamegraph" (SVG), "raw", "chrometrace".
+        duration: How many seconds to sample (default 5, recommended 5-60).
+        output_format: One of "speedscope" (JSON), "flamegraph" (SVG), "raw" (text), "chrometrace".
         rate: Samples per second (default 100).
         native: Include native/C extension frames if supported on this platform.
         idle: Include idle threads.
@@ -53,7 +69,7 @@ def record_profile(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "idempotentHint": True})
 def dump_stacks(
     pid: int,
     json_output: bool = True,
@@ -82,7 +98,7 @@ def dump_stacks(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "idempotentHint": True})
 def list_python_processes() -> str:
     """List running Python processes on this machine.
 
@@ -92,7 +108,7 @@ def list_python_processes() -> str:
     return tools.list_python_processes_tool()
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "idempotentHint": True})
 def analyze_profile(profile_path: str, top_n: int = 10) -> str:
     """Analyze an existing py-spy profile and return the hottest frames.
 
@@ -106,7 +122,7 @@ def analyze_profile(profile_path: str, top_n: int = 10) -> str:
     return tools.analyze_profile(profile_path, top_n=top_n)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "idempotentHint": True})
 def compare_profiles(profile_a: str, profile_b: str, top_n: int = 10) -> str:
     """Compare two speedscope profiles and show percentage changes.
 
@@ -121,7 +137,7 @@ def compare_profiles(profile_a: str, profile_b: str, top_n: int = 10) -> str:
     return tools.compare_profiles(profile_a, profile_b, top_n=top_n)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"destructiveHint": True})
 def top_profile(
     pid: Optional[int] = None,
     command: Optional[List[str]] = None,
@@ -134,10 +150,14 @@ def top_profile(
 ) -> str:
     """Run a live ``py-spy top`` view for a few seconds and return the summary.
 
+    On Windows, ``py-spy top`` cannot be captured through a pipe, so this tool
+    falls back to a short ``record --format raw`` sample and returns the hottest
+    frames instead of raw top output.
+
     Args:
         pid: Process ID. Use this OR command.
         command: Command to run and monitor. Use this OR pid.
-        duration: How many seconds to run top (default 5).
+        duration: How many seconds to run top (default 5, recommended 5-60).
         rate: Samples per second (default 100).
         native: Include native frames if supported.
         idle: Include idle threads.
@@ -145,7 +165,7 @@ def top_profile(
         subprocesses: Include child processes.
 
     Returns:
-        The final top summary lines.
+        The final top summary lines, or a hot-frame table on Windows.
     """
     return tools.top_profile(
         pid=pid,
