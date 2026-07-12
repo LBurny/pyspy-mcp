@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import argparse
+import json
+import logging
 import sys
 from typing import List, Optional
 
 from fastmcp import FastMCP
 
 from . import tools
+from .__init__ import __version__
+from .process_util import list_python_processes as _list_python_processes
+from .py_spy_finder import find_py_spy
+
+
+logger = logging.getLogger(__name__)
 
 mcp = FastMCP(
     "pyspy-mcp",
@@ -21,6 +30,47 @@ mcp = FastMCP(
         "When comparing two runs, generate both profiles with the same duration and rate."
     ),
 )
+
+
+def setup_logging(verbose: bool) -> None:
+    """Configure root logging level for the server."""
+    level = logging.DEBUG if verbose else logging.INFO
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        stream=sys.stderr,
+    )
+
+
+def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+    """Parse command-line arguments for the server entry point."""
+    parser = argparse.ArgumentParser(
+        prog="pyspy-mcp",
+        description="MCP server for Python performance profiling with py-spy",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose logging",
+    )
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "http"],
+        default="stdio",
+        help="MCP transport (default: stdio)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8080,
+        help="HTTP port when using --transport http (default: 8080)",
+    )
+    return parser.parse_args(argv)
 
 
 @mcp.tool(annotations={"destructiveHint": True})
@@ -179,9 +229,36 @@ def top_profile(
     )
 
 
+@mcp.resource("python://processes")
+def python_processes_resource() -> str:
+    """Return a JSON list of currently running Python processes."""
+    processes = _list_python_processes()
+    return json.dumps(
+        [
+            {
+                "pid": p.pid,
+                "cmdline": p.cmdline,
+                "create_time": p.create_time,
+                "username": p.username,
+                "memory_mb": round(p.memory_mb, 2),
+            }
+            for p in processes
+        ],
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
 def main() -> None:
     """Entry point used by the ``pyspy-mcp`` console script."""
-    mcp.run()
+    args = parse_args()
+    setup_logging(args.verbose)
+    logger.info("Starting pyspy-mcp v%s", __version__)
+    try:
+        logger.info("Resolved py-spy binary: %s", find_py_spy())
+    except FileNotFoundError as exc:
+        logger.warning("Could not resolve py-spy binary: %s", exc)
+    mcp.run(transport=args.transport, port=args.port)
 
 
 if __name__ == "__main__":

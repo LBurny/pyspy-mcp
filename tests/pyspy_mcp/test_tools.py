@@ -137,3 +137,42 @@ def test_find_py_sky_alias_removed():
     """The misspelled backwards-compatibility alias should be gone."""
     assert not hasattr(tools, "find_py_sky")
     assert hasattr(tools, "find_py_spy")
+
+
+from unittest.mock import MagicMock, patch
+
+from pyspy_mcp.errors import PySpyError
+
+
+def test_record_profile_permission_error_is_structured():
+    """A permission-denied failure from py-spy should produce a structured error."""
+    fake_result = MagicMock()
+    fake_result.returncode = 1
+    fake_result.stderr = "permission denied"
+    fake_result.args = ["py-spy", "record", "--pid", "1"]
+    with patch("pyspy_mcp.tools._run_py_spy", return_value=fake_result):
+        with pytest.raises(PySpyError) as exc:
+            tools.record_profile(pid=1, duration=1)
+    assert exc.value.error_type == "permission_denied"
+
+
+def test_record_profile_temp_file_cleaned_up():
+    """record_profile should remove the temporary file it creates."""
+    created_files = []
+    original_run = tools._run_py_spy
+
+    def mock_run(args, timeout=None, action="run"):
+        # Capture the output path that py-spy would write to.
+        idx = args.index("-o")
+        created_files.append(Path(args[idx + 1]))
+        result = MagicMock()
+        result.returncode = 0
+        result.stderr = ""
+        result.args = args
+        return result
+
+    with patch.object(tools, "_run_py_spy", side_effect=mock_run):
+        tools.record_profile(pid=1, duration=1, output_format="raw")
+
+    assert len(created_files) == 1
+    assert not created_files[0].exists()
